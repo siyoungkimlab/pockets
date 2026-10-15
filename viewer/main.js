@@ -188,7 +188,7 @@ async function load(model) {
       topo.atoms.residue.forEach((r, a) => topo.residueAtoms[r].push(a));
       topo.flags = hydrogenFlags(topo);
       topo.bondsOf = bondIndex(topo);
-      const f = await getFrame(model, Math.min(state.frame, topo.nframes - 1));
+      const f = await getFrame(model, frameOf(model, topo));
       model.pos = f.pos; model.box = f.box; model.ss = topo.ss;
       model.topo = topo;
       const old = model.keep;  // the state before a reload, to carry over by atom name
@@ -278,12 +278,18 @@ async function selectIds(model, sel) {
     if (!ids) throw new Error("selections typed in need boonza view");
     return Int32Array.from(ids);
   }
-  const frame = model.topo ? Math.min(state.frame, model.topo.nframes - 1) : 0;
+  const frame = model.topo ? frameOf(model) : 0;
   return Int32Array.from((await post("api/select", { m: model.index, sel, frame })).ids);
 }
 
-function nframes() {
-  return Math.max(1, ...shownModels().map(m => m.topo.nframes));
+// the frame a model shows: its own, when a site pinned it (the MD frame the site was
+// found in), else the player's
+function frameOf(m, topo = m.topo) {
+  return m.pinned ?? Math.min(state.frame, topo.nframes - 1);
+}
+
+function nframes() {  // the player's: models a site pins keep to their frame
+  return Math.max(1, ...shownModels().filter(m => m.pinned === undefined).map(m => m.topo.nframes));
 }
 
 async function show(models, on = true) {
@@ -291,17 +297,29 @@ async function show(models, on = true) {
   // a model tied to a frame of another (a site and the MD frame it was found in):
   // that model comes along, at that frame
   const linked = on ? models.filter(m => m.frame) : [];
+  const pinned = [];
   for (const m of linked) {
     const target = state.models.find(t => t.name === m.frame.model && !t.closed);
-    if (target && !models.includes(target)) { target.shown = true; models = [...models, target]; }
+    if (!target) continue;
+    target.shown = true;
+    target.pinned = m.frame.i;
+    pinned.push(target);
+    if (!models.includes(target)) models = [...models, target];
+  }
+  // a model only sites bring along (not in the list) goes when no site shown needs it
+  for (const t of state.models) {
+    if (t.listed === false && t.shown && !state.models.some(m => m.shown && m.frame?.model === t.name)) t.shown = false;
   }
   try {
     await Promise.all(models.filter(() => on).map(load));
   } catch (e) {
     message(e.message, true);
   }
-  const last = linked[linked.length - 1];
-  if (last) { await setFrame(last.frame.i); app.onModels(); return; }
+  for (const t of pinned) {  // each at its own frame
+    if (!t.topo) continue;
+    const f = await getFrame(t, t.pinned);
+    t.pos = f.pos; t.box = f.box;
+  }
   await refreshContacts();
   updatePlayer();
   rebuild();
@@ -786,7 +804,7 @@ function updatePlayer() {
 async function refreshContacts() {
   if (!state.contacts) return;
   await Promise.all(shownModels().map(async m => {
-    const i = Math.min(state.frame, m.topo.nframes - 1);
+    const i = frameOf(m);
     try { m.contacts = (await getJSON(`api/contacts?m=${m.index}&i=${i}`)).contacts; }
     catch (e) { m.contacts = []; }
   }));
@@ -798,7 +816,7 @@ async function setFrame(i) {
   if (state.loading) { state.pending = i; return; }
   state.loading = true;
   try {
-    await Promise.all(shownModels().map(async m => {
+    await Promise.all(shownModels().filter(m => m.pinned === undefined).map(async m => {
       const k = Math.min(i, m.topo.nframes - 1);
       const f = await getFrame(m, k);
       if (state.ssEachFrame) m.ss = (await getJSON(`api/ss?m=${m.index}&i=${k}`)).ss;
