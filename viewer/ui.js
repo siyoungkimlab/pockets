@@ -323,28 +323,28 @@ export function setupUI(app) {
   const SURFACES = [["plain", "Molecular"], ["electrostatic", "Electrostatic"], ["hydrophobic", "Hydrophobic"]];
   const surfaceItems = () => [
     ...SURFACES.map(([kind, label]) => ({ label, run: () => setSurface(kind),
-      checked: () => app.currentModel()?.surfaceSpec?.kind === kind })),
+      checked: () => (app.currentModel()?.layers || []).some(l => l.on && l.style === SURFACE_STYLE[kind]) })),
     "-",
     { label: "Off", run: () => setSurface(null) },
   ];
-  let surfaceVersion = 0;
-  function setSurface(kind) {
+  const SURFACE_STYLE = { plain: "surface", electrostatic: "electrostatic", hydrophobic: "hydrophobic" };
+  // a surface layer (Representations) of the selected atoms, else of the model's receptor;
+  // Off removes the surface layers
+  async function setSurface(kind) {
     const sel = app.selection();
     const targets = sel.length ? sel : [[app.currentModel(), null]];
     for (const [m, ids] of targets) {
       if (!m?.topo) continue;
-      if (!kind) { m.surfaceSpec = null; m.surfaceMesh = null; continue; }
-      let atoms = ids;
-      if (!atoms) {
-        const A = m.topo.atoms, all = app.range(m.topo.natoms);
-        atoms = all.filter(a => A.class[a] === 0);
-        if (!atoms.length) atoms = all.filter(a => A.class[a] !== 2);
-      }
-      m.surfaceSpec = { kind, ids: atoms, version: ++surfaceVersion };
+      const layers = layersOf(m).filter(l => !SURFACE_STYLES.includes(l.style));
+      if (kind) layers.push(newLayer(ids ? { sel: `selected (${ids.length} atoms)`, ids } : { sel: "receptor" },
+                                     SURFACE_STYLE[kind]));
+      m.layers = layers;
+      await applyLayers(m, { surfacesOnly: true });
+      refreshLayers(m);
     }
     if (kind) app.message(`${kind === "plain" ? "molecular" : kind} surface${kind === "electrostatic" ? ": red −5 to blue +5 kT/e (Coulomb, ε = 4r)" : kind === "hydrophobic" ? ": dark cyan hydrophilic, goldenrod hydrophobic" : ""}`);
-    app.rebuild();
   }
+
 
   const themeItems = () => [
     { label: "Blanc", run: () => theme("blanc"), checked: () => document.body.classList.contains("blanc") },
@@ -1263,27 +1263,141 @@ export function setupUI(app) {
   const MODEL_COLORS = [["default", "Default"], ["chain", "By chain"], ...["green", "cyan", "magenta", "yellow",
     "orange", "salmon", "purple", "slate", "white", "gray"].map(c => [c, c])];
 
-  async function preset(m, kind) {
+  // --- representations: each model a list of layers (selection, style, colour, on) -------------
+  // drawn in order, later layers over earlier ones; the presets are layer lists to start from.
+  // Selections: names the page knows (all, receptor, ligand, solvent, not solvent, and the
+  // model's own: pocket, holo site, ...), atoms picked ("+ Selected atoms"), or, with
+  // boonza view behind the page, any selection text.
+  const STYLE_OPTIONS = [["cartoon", "Ribbon"], ["lines", "Lines"], ["sticks", "Licorice"],
+    ["ballstick", "Ball and Stick"], ["spheres", "Space filling"], ["surface", "Surface"],
+    ["electrostatic", "Electrostatic surface"], ["hydrophobic", "Hydrophobic surface"]];
+  const SURFACE_STYLES = ["surface", "electrostatic", "hydrophobic"];
+  const LAYER_COLORS = [["default", "Default"], ["model", "Model colour"], ["element", "Element"], ["chain", "Chain"],
+    ["restype", "Residue type"], ["ss", "Secondary structure"], ["spectrum", "Spectrum"], ["bfactor", "B-factor"],
+    ...["white", "gray", "green", "cyan", "magenta", "yellow", "orange", "salmon", "purple", "slate"].map(c => [c, c])];
+  const PRESET_LAYERS = {
+    ribbon: [["receptor", "cartoon"]],
+    ribbonlig: [["receptor", "cartoon"], ["ligand", "sticks"]],
+    ribbonlicorice: [["receptor", "cartoon"], ["not solvent", "sticks"]],
+    ribbonspace: [["receptor", "cartoon"], ["ligand", "spheres"]],
+    ribbonlines: [["receptor", "cartoon"], ["not solvent", "lines"]],
+    line: [["all", "lines"]], stick: [["all", "sticks"]], ballstick: [["all", "ballstick"]], space: [["all", "spheres"]],
+  };
+  let layerVersion = 0;
+  const newLayer = (what, style, color = "default") =>
+    ({ sel: what.sel, ids: what.ids || null, style, color, on: true, version: ++layerVersion });
+
+  function layersOf(m) {
+    if (!m.layers) m.layers = m.topo.reps.map(r => newLayer({ sel: r.label || r.sel }, r.style, "default"));
+    return m.layers;
+  }
+  function namedSets(m) {
+    const A = m.topo.atoms, all = app.range(m.topo.natoms);
+    const sets = { all: () => all, receptor: () => all.filter(a => A.class[a] === 0),
+                   ligand: () => all.filter(a => A.class[a] === 1), solvent: () => all.filter(a => A.class[a] === 2),
+                   "not solvent": () => all.filter(a => A.class[a] !== 2) };
+    for (const r of m.topo.reps) if (r.label && !sets[r.label]) sets[r.label] = async () => r.ids || serverSelect(m, r.sel);
+    return sets;
+  }
+  async function layerIds(m, l) {
+    if (l.ids) return l.ids;
+    const named = namedSets(m)[l.sel.trim()];
+    if (named) return await named();
+    return await serverSelect(m, l.sel);
+  }
+  async function applyLayers(m, { surfacesOnly = false } = {}) {
     await app.load(m);
-    const st = m.state, n = m.topo.natoms, R = m.topo.residues;
-    m.preset = kind;
-    if (kind === "site") {  // the defaults: cartoon, pocket, ligand
-      const reps = await Promise.all(m.topo.reps.map(async r => ({ ...r, ids: await serverSelect(m, r.sel) })));
+    const st = m.state, topo = m.topo, on = [];
+    for (const l of layersOf(m)) if (l.on) on.push({ ...l, ids: await layerIds(m, l) });
+    if (!surfacesOnly) {
+      const all = app.range(topo.natoms), res = app.range(topo.residues.name.length);
       st.show.fill(0); st.ribbon.fill(0);
-      app.applyReps(m, reps);
-    } else {
-      const ribbon = kind.startsWith("ribbon");
-      for (let r = 0; r < st.ribbon.length; r++) st.ribbon[r] = ribbon && R.trace[r] >= 0 ? 1 : 0;
-      const style = { line: 0, stick: 1, ballstick: 3, space: 4, ribbonlines: 0, ribbonlig: 1, ribbonspace: 4,
-                      ribbonlicorice: 1 }[kind];
-      st.show.fill(0);
-      let ids = app.range(n);
-      if (kind === "ribbonlig" || kind === "ribbonspace") ids = await serverSelect(m, `same residue as (${m.topo.ligand})`);
-      if (kind === "ribbonlines" || kind === "ribbonlicorice") ids = ids.filter(a => m.topo.atoms.class[a] !== 2);
-      if (kind !== "ribbon") for (const a of ids) { st.show[a] = 1; st.style[a] = style; }
+      colorAtoms("element", all, topo, m.ss, st.rgb);
+      colorResidues(topo.cg ? "chain" : "ss", res, topo, m.ss, st.ribbonRGB);
+      app.tintReceptor(m);
+      for (const l of on) {
+        if (SURFACE_STYLES.includes(l.style)) continue;
+        const color = l.color === "model" ? (m.color || "white") : l.color;
+        if (l.style === "cartoon") {
+          const rs = [...new Set(l.ids.map(a => topo.atoms.residue[a]))].filter(r => topo.residues.trace[r] >= 0);
+          for (const r of rs) st.ribbon[r] = 1;
+          if (l.color !== "default") colorResidues(color, rs, topo, m.ss, st.ribbonRGB);
+        } else {
+          for (const a of l.ids) { st.show[a] = 1; st.style[a] = app.FROM_REP[l.style] ?? app.STYLE.stick; }
+          if (l.color !== "default") colorAtoms(l.color === "model" ? `element/${color}` : color, l.ids, topo, m.ss, st.rgb);
+        }
+      }
+      m.surfaceCache?.clear();
     }
+    m.surfaces = on.filter(l => SURFACE_STYLES.includes(l.style))
+      .map(l => ({ kind: l.style === "surface" ? "plain" : l.style, ids: l.ids, color: l.color, version: l.version }));
     app.rebuild();
   }
+
+  async function preset(m, kind) {
+    await app.load(m);
+    m.preset = kind;
+    const surfaces = layersOf(m).filter(l => SURFACE_STYLES.includes(l.style));  // presets keep surfaces
+    m.layers = kind === "site" ? null : PRESET_LAYERS[kind].map(([sel, style]) => newLayer({ sel }, style));
+    m.layers = [...layersOf(m), ...surfaces];
+    await applyLayers(m);
+    refreshLayers(m);
+  }
+
+  // the Representations panel of a model: its layers, to change, add and delete
+  function layersPanel(m) {
+    panel("layers", `Representations · ${m.name}`, body => {
+      body.dataset.model = m.index;
+      const names = Object.keys(namedSets(m));
+      const list = el("datalist", { id: "layer-names" }, ...names.map(n => el("option", { value: n })));
+      const rows = el("div", { className: "layers" });
+      const redraw = () => {
+        rows.innerHTML = "";
+        layersOf(m).forEach((l, k) => {
+          const change = async (surfaceOnly = false) => { l.version = ++layerVersion; await applyLayers(m, { surfacesOnly: surfaceOnly }); };
+          const on = el("input", { type: "checkbox", checked: l.on, title: "show this layer" });
+          on.onchange = () => { l.on = on.checked; change(SURFACE_STYLES.includes(l.style)); };
+          const sel = el("input", { value: l.sel, spellcheck: false, title: app.STATIC
+            ? "a name: " + names.join(", ") : "a name (" + names.join(", ") + ") or a selection" });
+          sel.setAttribute("list", "layer-names");
+          sel.onchange = () => { l.sel = sel.value.trim(); l.ids = null; change(); };
+          const style = el("select");
+          for (const [v, t] of STYLE_OPTIONS) style.add(new Option(t, v, false, v === l.style));
+          style.onchange = () => { l.style = style.value; change(); };
+          const color = el("select");
+          for (const [v, t] of LAYER_COLORS) color.add(new Option(t, v, false, v === l.color));
+          color.onchange = () => { l.color = color.value; change(); };
+          const up = button("↑", () => { if (k) { [m.layers[k - 1], m.layers[k]] = [m.layers[k], m.layers[k - 1]]; redraw(); change(); } });
+          up.title = "earlier (drawn under the later ones)";
+          const x = button("✕", () => { m.layers.splice(k, 1); redraw(); applyLayers(m); });
+          x.title = "delete this layer";
+          rows.append(el("div", { className: "layer" }, on, sel, style, color, up, x));
+        });
+      };
+      redraw();
+      const add = button("+ Layer", () => { layersOf(m).push(newLayer({ sel: "ligand" }, "sticks")); redraw(); applyLayers(m); });
+      const picked = button("+ Selected atoms", () => {
+        const ids = app.selection().find(([x]) => x === m)?.[1];
+        if (!ids?.length) { app.message("select atoms of this model first", true); return; }
+        layersOf(m).push(newLayer({ sel: `selected (${ids.length} atoms)`, ids: ids.slice() }, "sticks"));
+        redraw(); applyLayers(m);
+      });
+      const presets = el("select");
+      presets.add(new Option("Start from…", ""));
+      for (const [v, t] of PRESETS) presets.add(new Option(t, v));
+      presets.onchange = async () => { if (presets.value) await preset(m, presets.value); };
+      body.append(list, rows, row(add, picked, presets));
+      body.append(el("p", { className: "help" }, "Layers draw in order, later over earlier. "
+        + (app.STATIC ? "Selections: " + names.join(", ") + ", or atoms picked with + Selected atoms."
+                      : "A selection is a name above or any selection text (resname LIG, within 5 of ligand, ...).")));
+      body.refresh = redraw;
+    });
+  }
+  function refreshLayers(m) {
+    const body = document.querySelector('#panels .body[data-model]');
+    if (body && +body.dataset.model === m.index) body.refresh?.();
+  }
+
 
   function colorModel(m, spec) {
     if (!m.state) return;
@@ -1301,7 +1415,7 @@ export function setupUI(app) {
       colorAtoms(`element/${spec}`, all, m.topo, m.ss, m.state.rgb);
       colorResidues(spec, res, m.topo, m.ss, m.state.ribbonRGB);
     }
-    m.surfaceMesh = null;  // a plain surface takes the atoms' colours
+    m.surfaceCache?.clear();  // a plain surface takes the atoms' colours
     app.rebuild();
   }
 
@@ -1326,6 +1440,7 @@ export function setupUI(app) {
     }
     let group = null;
     for (const m of sortedModels()) {
+      if (m.listed === false) continue;  // a model others bring along (MD frames of sites)
       if (m.group !== group && !state.sort?.column) {
         group = m.group;
         if (group) list.append(el("div", { className: "mgroup" }, group));
@@ -1341,12 +1456,14 @@ export function setupUI(app) {
       for (const [v, l] of MODEL_COLORS) color.add(new Option(l, v, false, (m.color || "default") === v));
       if (m.color && !MODEL_COLORS.some(([v]) => v === m.color)) color.add(new Option("its own", m.color, false, true));
       color.onchange = async () => { await app.load(m); colorModel(m, color.value); sw.style.background = swatchColor(color.value); };
-      const rep = el("select", { title: "representation" });
+      const rep = el("select", { title: "representation (a preset: ≡ edits its layers)" });
       for (const [v, l] of PRESETS) rep.add(new Option(l, v, false, (m.preset || "site") === v));
       rep.onchange = () => preset(m, rep.value);
+      const layers = el("button", { className: "x", title: "representations: add, change, delete layers" }, "≡");
+      layers.onclick = async () => { await app.load(m); layersPanel(m); };
       const x = el("button", { className: "x", title: "close this model" }, "✕");
       x.onclick = () => closeModel(m);
-      row.append(el("div", { className: "top" }, box, sw, name, color, rep, x));
+      row.append(el("div", { className: "top" }, box, sw, name, color, rep, layers, x));
       const data = Object.entries(m.row || {}).filter(([k]) => k !== "name");
       if (data.length) row.append(el("div", { className: "data", title: data.map(([k, v]) => `${k} ${cell(v)}`).join("\n") },
         data.map(([k, v]) => `${k} ${cell(v)}`).join(" · ")));

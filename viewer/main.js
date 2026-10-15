@@ -926,7 +926,7 @@ const app = {
   rebuild, draw, flyTo, stopFlight, centerView, resetView, viewAll, bounds, measure, xyz,
   pick, inRect, beginMove, rotateSelected, translateSelected, turnDihedral, endMove,
   setFrame, play, nframes, updatePlayer, refreshContacts,
-  range, STYLE, pageState, restorePage, PYTHON,
+  range, STYLE, FROM_REP, pageState, restorePage, PYTHON,
   onSelection: () => {}, onModels: () => {},  // ui.js fills these in
 };
 app.STATIC = STATIC;
