@@ -394,16 +394,31 @@ function cellLines(box) {
 }
 
 // a model's surface (Render | Surface): made again when its atoms move or its kind changes
-function surfaceOf(m) {
-  const want = m.surfaceSpec;
-  if (!want) return null;
-  const s = m.surfaceMesh;
-  if (s && s.pos === m.pos && s.kind === want.kind && s.version === want.version) return s.mesh;
-  const t0 = performance.now();
-  const mesh = surface(m, want.ids, want.kind);
-  m.surfaceMesh = { pos: m.pos, kind: want.kind, version: want.version, mesh };
-  if (performance.now() - t0 > 2000) message(`surface: ${mesh.index.length / 3} triangles in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
-  return mesh;
+function surfacesOf(m) {
+  const want = m.surfaces || [];
+  m.surfaceCache = m.surfaceCache || new Map();
+  const out = [];
+  for (const w of want) {
+    const key = `${w.version}`;
+    let c = m.surfaceCache.get(key);
+    if (!c || c.pos !== m.pos) {
+      const t0 = performance.now();
+      // a plain surface in a colour of its own: its atoms coloured so, for this surface only
+      let model = m;
+      if (w.kind === "plain" && w.color && w.color !== "default") {
+        const rgb = m.state.rgb.slice();
+        colorAtoms(w.color === "model" ? `element/${m.color || "white"}` : w.color, w.ids, m.topo, m.ss, rgb);
+        model = { ...m, state: { ...m.state, rgb } };
+      }
+      c = { pos: m.pos, mesh: surface(model, w.ids, w.kind) };
+      m.surfaceCache.set(key, c);
+      const s = (performance.now() - t0) / 1000;
+      if (s > 2) message(`surface: ${c.mesh.index.length / 3} triangles in ${s.toFixed(1)} s`);
+    }
+    out.push(c.mesh);
+  }
+  for (const k of [...m.surfaceCache.keys()]) if (!want.some(w => `${w.version}` === k)) m.surfaceCache.delete(k);
+  return out;
 }
 
 function rebuild() {
@@ -421,7 +436,7 @@ function rebuild() {
       for (let k = 0; k + 1 < a.length; k++) dashes.push([...xyz(m, a[k]), ...xyz(m, a[k + 1]), ...METER_COLOR]);
     }
     m.drawn = show;
-    return { topo: m.topo, pos: m.pos, ss: m.ss, state: { ...st, show }, dashes, surface: surfaceOf(m) };
+    return { topo: m.topo, pos: m.pos, ss: m.ss, state: { ...st, show }, dashes, surfaces: surfacesOf(m) };
   });
   const scene = buildScene(items);
   showSummary();
@@ -906,7 +921,7 @@ async function restorePage(page) {
 const app = {
   state, camera, renderer, canvas,
   getJSON, post, busy, message, atomLabel,
-  live, shownModels, currentModel, load, show, solo, reloadModel, selectIds, newModel, applyReps,
+  live, shownModels, currentModel, load, show, solo, reloadModel, selectIds, newModel, applyReps, tintReceptor,
   selected, selection, targets, select, clearSelection, visibleAtom,
   rebuild, draw, flyTo, stopFlight, centerView, resetView, viewAll, bounds, measure, xyz,
   pick, inRect, beginMove, rotateSelected, translateSelected, turnDihedral, endMove,

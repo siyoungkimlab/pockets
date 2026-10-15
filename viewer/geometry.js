@@ -45,7 +45,7 @@ export function buildScene(models) {
   const m = { position: new Grow(), normal: new Grow(), color: new Grow(), index: [] };
   for (const model of models) {
     addModel(model, s, c, l, m);
-    if (model.surface) addSurface(model.surface, m);
+    for (const surf of model.surfaces || []) addSurface(surf, m);
   }
   return {
     spheres: { center: s.center.array, radius: s.radius.array, color: s.color.array },
