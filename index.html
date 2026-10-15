@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pockets in apo structures · Siyoung Kim Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#ffffff;--ink:#1c1b19;--text:#232220;--text2:#5a564d;--text3:#6f6a5f;--muted:#9a958a;
+    --accent:#b07a18;--accent-strong:#9a6a14;--line:#e9e5da;
+    --sans:'IBM Plex Sans',system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  .pl-nav{position:sticky;top:0;z-index:30;background:rgba(255,255,255,0.93);backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;
+    gap:14px;flex-wrap:wrap;padding:16px 40px}
+  .pl-brand{font-weight:600;font-size:18px;letter-spacing:-0.01em;text-decoration:none;color:#232220}
+  .pl-navlinks{display:flex;gap:28px;font-size:15px;color:var(--text3)}
+  .pl-navlinks a{text-decoration:none;color:var(--text3)}
+  .pl-navlinks a:hover{color:var(--accent-strong)}
+  .pl-wrap{max-width:980px;margin:0 auto;padding:0 40px}
+  main{padding:56px 0 40px}
+  .pl-eyebrow{font-family:var(--mono);font-size:13px;letter-spacing:0.04em;color:var(--accent-strong);text-transform:uppercase}
+  h1.pl-title{font-weight:600;font-size:40px;line-height:1.08;letter-spacing:-0.025em;color:var(--ink);margin-top:8px}
+  .pl-lede{font-size:18px;line-height:1.55;color:var(--text2);margin-top:16px;max-width:720px}
+  .pl-lede b{color:var(--ink);font-weight:500}
+  .how{font-size:15px;line-height:1.6;color:var(--text2);margin-top:14px;max-width:720px}
+  table{width:100%;border-collapse:collapse;font-size:15px;margin-top:30px}
+  th,td{border-bottom:1px solid var(--line);padding:9px 12px;text-align:right;white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  th{font-family:var(--mono);font-size:12.5px;letter-spacing:0.04em;text-transform:uppercase;color:var(--muted);font-weight:500;cursor:pointer}
+  th:hover{color:var(--accent-strong)}
+  td a{color:var(--accent-strong);text-decoration:none;font-family:var(--mono);font-weight:500}
+  td a:hover{text-decoration:underline}
+  td.num{font-variant-numeric:tabular-nums}
+  .pl-foot{max-width:980px;margin:40px auto 0;padding:22px 40px 44px;border-top:1px solid var(--line);
+    display:flex;gap:12px 26px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+  .pl-foot .tag{font-family:var(--mono);letter-spacing:0.04em;text-transform:uppercase}
+  @media (max-width:680px){.pl-nav{padding:14px 18px}.pl-wrap{padding:0 18px}.pl-navlinks{gap:15px;font-size:14px}
+    h1.pl-title{font-size:30px}}
+</style>
+</head>
+<body>
+  <div class="pl-nav">
+    <a class="pl-brand" href="https://siyoungkimlab.com/index.html">SiyoungKimLab</a>
+    <nav class="pl-navlinks">
+      <a href="https://siyoungkimlab.com/index.html">Home</a>
+      <a href="https://siyoungkimlab.com/research.html">Research</a>
+      <a href="https://siyoungkimlab.com/team.html">Team</a>
+      <a href="https://siyoungkimlab.com/publications.html">Publications</a>
+      <a href="https://siyoungkimlab.com/blog.html">Blog</a>
+      <a href="https://siyoungkimlab.com/contact.html">Contact</a>
+    </nav>
+  </div>
+  <main><div class="pl-wrap">
+    <div class="pl-eyebrow">Pocket finding · 7 apo/holo pairs</div>
+    <h1 class="pl-title">Finding ligand pockets in apo structures</h1>
+    <p class="pl-lede">For each pair: the <b>apo</b> and <b>holo</b> structures; the sites
+    <b>Schrödinger MxMD + SiteMap</b> finds; and the pockets <b>CRUMB</b> finds in coarse-grained
+    simulations of the apo protein, with <b>Martini 3</b>, <b>SIRAH</b> and <b>Martini 2</b>.
+    Every site and pocket comes with the MD frame it was found in, everything superposed on the holo structure.</p>
+    <p class="how">Pick a site or pocket in the list on the right of a pair's page: its frame comes with it,
+    and the box in the corner gives its distance to the ligand, how much of the ligand it covers, and how much of
+    it the ligand fills. Drag to turn, scroll to zoom, click an atom to see what it is; SiteView looks at the
+    ligand's pocket, WholeView looks at everything. Pocket RMSD: apo against holo, heavy atoms of the residues
+    within 5 Å of the ligand. Burial: the share of the ligand's surface the holo protein covers.</p>
+    <table>
+      <thead><tr><th>pair</th><th>apo</th><th>holo</th><th>pocket RMSD</th><th>burial</th>
+        <th>MxMD sites</th><th>CRUMB pockets</th></tr></thead>
+      <tbody>
+<tr><td><a href="1nep_2hka/">1nep_2hka</a></td><td>1NEP</td><td>2HKA</td><td class="num">1.76 Å</td><td class="num">77.7%</td><td class="num">14</td><td class="num">27</td></tr>
+<tr><td><a href="3fvj_2b03/">3fvj_2b03</a></td><td>3FVJ</td><td>2B03</td><td class="num">2.72 Å</td><td class="num">78.0%</td><td class="num">18</td><td class="num">26</td></tr>
+<tr><td><a href="3lnz_4qoc/">3lnz_4qoc</a></td><td>3LNZ</td><td>4QOC</td><td class="num">2.43 Å</td><td class="num">69.0%</td><td class="num">9</td><td class="num">23</td></tr>
+<tr><td><a href="3nx1_3nx2/">3nx1_3nx2</a></td><td>3NX1</td><td>3NX2</td><td class="num">2.20 Å</td><td class="num">75.0%</td><td class="num">28</td><td class="num">30</td></tr>
+<tr><td><a href="3qxw_3qxv/">3qxw_3qxv</a></td><td>3QXW</td><td>3QXV</td><td class="num">3.43 Å</td><td class="num">80.5%</td><td class="num">13</td><td class="num">27</td></tr>
+<tr><td><a href="5h9a_6e5l/">5h9a_6e5l</a></td><td>5H9A</td><td>6E5L</td><td class="num">1.74 Å</td><td class="num">94.4%</td><td class="num">18</td><td class="num">30</td></tr>
+<tr><td><a href="6e5d_6e5f/">6e5d_6e5f</a></td><td>6E5D</td><td>6E5F</td><td class="num">1.31 Å</td><td class="num">63.4%</td><td class="num">36</td><td class="num">30</td></tr>
+      </tbody>
+    </table>
+  </div></main>
+  <div class="pl-foot"><span class="tag">Siyoung Kim Lab</span><span>Drawn with boonza view</span></div>
+<script>
+for (const th of document.querySelectorAll("th")) th.onclick = () => {
+  const k = [...th.parentNode.children].indexOf(th), body = document.querySelector("tbody");
+  const val = tr => { const t = tr.children[k].dataset.v ?? tr.children[k].textContent; const x = parseFloat(t); return isNaN(x) ? t : x; };
+  const up = th.dataset.up !== "1"; th.dataset.up = up ? "1" : "0";
+  [...body.rows].sort((a, b) => (val(a) > val(b) ? 1 : -1) * (up ? 1 : -1)).forEach(r => body.append(r));
+};
+</script>
+</body>
+</html>
