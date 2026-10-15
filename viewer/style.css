@@ -242,3 +242,9 @@ body.noir #dial { background: linear-gradient(to bottom, #4a4a4a, #2a2a2a); }
 
 /* a static page (an export): no server behind it, so nothing that edits */
 html.static #btn-py, html.static #btn-cancel, html.static #ff-button, html.static #ldock { display: none; }
+
+/* the Representations panel: a row per layer */
+.panel .layers { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
+.panel .layer { display: flex; gap: 3px; align-items: center; }
+.panel .layer input:not([type=checkbox]) { width: 170px; }
+.panel .layer select { max-width: 150px; }
