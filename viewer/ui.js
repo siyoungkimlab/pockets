@@ -1257,9 +1257,9 @@ export function setupUI(app) {
   // --- the models, docked on the right: on/off, colour, representation, the table's data --
 
   const PRESETS = [["site", "SiteView"], ["ribbon", "Ribbon"], ["ribbonlig", "Ribbon + ligand"],
+                   ["ribbonlicorice", "Ribbon + Licorice"], ["ribbonspace", "Ribbon + Space Filling"],
                    ["ribbonlines", "Ribbon + lines"], ["line", "Lines"], ["stick", "Sticks"],
-                   ["ballstick", "Ball and Stick"], ["space", "Space filling"],
-                   ["ribbonspace", "Ribbon + Space Filling"]];
+                   ["ballstick", "Ball and Stick"], ["space", "Space filling"]];
   const MODEL_COLORS = [["default", "Default"], ["chain", "By chain"], ...["green", "cyan", "magenta", "yellow",
     "orange", "salmon", "purple", "slate", "white", "gray"].map(c => [c, c])];
 
@@ -1274,11 +1274,12 @@ export function setupUI(app) {
     } else {
       const ribbon = kind.startsWith("ribbon");
       for (let r = 0; r < st.ribbon.length; r++) st.ribbon[r] = ribbon && R.trace[r] >= 0 ? 1 : 0;
-      const style = { line: 0, stick: 1, ballstick: 3, space: 4, ribbonlines: 0, ribbonlig: 1, ribbonspace: 4 }[kind];
+      const style = { line: 0, stick: 1, ballstick: 3, space: 4, ribbonlines: 0, ribbonlig: 1, ribbonspace: 4,
+                      ribbonlicorice: 1 }[kind];
       st.show.fill(0);
       let ids = app.range(n);
       if (kind === "ribbonlig" || kind === "ribbonspace") ids = await serverSelect(m, `same residue as (${m.topo.ligand})`);
-      if (kind === "ribbonlines") ids = ids.filter(a => m.topo.atoms.class[a] !== 2);
+      if (kind === "ribbonlines" || kind === "ribbonlicorice") ids = ids.filter(a => m.topo.atoms.class[a] !== 2);
       if (kind !== "ribbon") for (const a of ids) { st.show[a] = 1; st.style[a] = style; }
     }
     app.rebuild();
