@@ -332,6 +332,7 @@ async function solo(model) {
   for (const m of live()) if (m.group === model.group) m.shown = m === model;
   state.current = model.index;
   await show([model]);
+  if (state.focus) return;  // the view stays on the focus: does this site fall in its pocket?
   const ids = interesting(model);
   if (ids.length) { const [c, r] = bounds(model, ids); flyTo(c, r + (model.topo.cg ? 10 : 6)); }
 }
@@ -982,6 +983,7 @@ async function main() {
     state.title = listing.title;
     state.columns = listing.columns;
     state.summary = listing.summary || [];
+    state.focus = listing.focus || null;
     state.groups = listing.groups || {};  // the builder's functional groups: name -> SMILES
     state.models = listing.models.map((m, index) => newModel(m, index));
     document.title = listing.title ? `${listing.title} · boonza` : "boonza";
@@ -990,6 +992,7 @@ async function main() {
     state.current = first.index;
     await show(state.models.filter(m => m.shown));
     resetView();
+    if (state.focus && !listing.page) await app.siteView({ quick: true });
     showSummary();
     if (listing.page) await restorePage(listing.page);
     app.onSelection();

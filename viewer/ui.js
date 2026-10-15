@@ -131,9 +131,15 @@ export function setupUI(app) {
     : `(same residue as ((protein or nucleic) and within 4.5 of (${m.topo.ligand}))) and not (${m.topo.ligand})`;
 
   // SiteView: the ligand and its pocket, everything else as ribbon, looked at
-  async function siteView() {
-    const m = app.currentModel();
-    if (!m.topo) return;
+  // with a focus (a holo structure the page compares sites against) always its site
+  async function siteView({ quick = false } = {}) {
+    let m = app.currentModel();
+    const focus = state.focus && app.live().find(x => x.name === state.focus);
+    if (focus) {
+      m = focus;
+      if (!m.shown || !m.topo) await app.show([m]);
+    }
+    if (!m?.topo) return;
     const lig = await serverSelect(m, `same residue as (${m.topo.ligand})`);
     if (!lig.length) { app.message("no ligand: Ligand | Choose Ligand picks one", true); return; }
     const pocket = await serverSelect(m, pocketSelection(m));
@@ -148,8 +154,10 @@ export function setupUI(app) {
     colorAtoms(`element/${m.topo.carbon || "green"}`, molecule, m.topo, m.ss, st.rgb);
     app.rebuild();
     const [c, r] = app.bounds(m, [...lig, ...pocket]);
-    app.flyTo(c, Math.max(r, 8));
+    app.flyTo(c, Math.max(r, 8), quick ? 1 : undefined);
   }
+
+  app.siteView = siteView;
 
   // WholeView: the display from before SiteView back, and everything in view
   function wholeView() {
