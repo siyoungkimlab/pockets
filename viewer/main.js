@@ -195,7 +195,9 @@ async function load(model) {
       model.state = initialState(model);
       if (old) carryOver(old, model);
       else {
-        applyReps(model, await Promise.all(topo.reps.map(async r => ({ ...r, ids: r.ids || await selectIds(model, r.sel) }))));
+        // a representation with on: false is there to switch on (Representations), not drawn yet
+        applyReps(model, await Promise.all(topo.reps.filter(r => r.on !== false)
+          .map(async r => ({ ...r, ids: r.ids || await selectIds(model, r.sel) }))));
         tintReceptor(model);
       }
       model.keep = null;
@@ -992,7 +994,7 @@ async function main() {
     state.current = first.index;
     await show(state.models.filter(m => m.shown));
     resetView();
-    if (state.focus && !listing.page) await app.siteView({ quick: true });
+    if (state.focus && !listing.page) await app.siteView({ quick: true, look: true });
     showSummary();
     if (listing.page) await restorePage(listing.page);
     app.onSelection();

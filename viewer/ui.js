@@ -132,7 +132,7 @@ export function setupUI(app) {
 
   // SiteView: the ligand and its pocket, everything else as ribbon, looked at
   // with a focus (a holo structure the page compares sites against) always its site
-  async function siteView({ quick = false } = {}) {
+  async function siteView({ quick = false, look = false } = {}) {
     let m = app.currentModel();
     const focus = state.focus && app.live().find(x => x.name === state.focus);
     if (focus) {
@@ -143,6 +143,11 @@ export function setupUI(app) {
     const lig = await serverSelect(m, `same residue as (${m.topo.ligand})`);
     if (!lig.length) { app.message("no ligand: Ligand | Choose Ligand picks one", true); return; }
     const pocket = await serverSelect(m, pocketSelection(m));
+    if (look) {  // only look there (opening a page), the display as it is
+      const [c, r] = app.bounds(m, [...lig, ...pocket]);
+      app.flyTo(c, Math.max(r, 8), quick ? 1 : undefined);
+      return;
+    }
     const st = m.state;
     if (!m.beforeSite) m.beforeSite = { show: st.show.slice(), style: st.style.slice(), rgb: st.rgb.slice(), ribbon: st.ribbon.slice() };
     st.show.fill(0);
@@ -1296,7 +1301,7 @@ export function setupUI(app) {
     ({ sel: what.sel, ids: what.ids || null, style, color, on: true, version: ++layerVersion });
 
   function layersOf(m) {
-    if (!m.layers) m.layers = m.topo.reps.map(r => newLayer({ sel: r.label || r.sel }, r.style, "default"));
+    if (!m.layers) m.layers = m.topo.reps.map(r => ({ ...newLayer({ sel: r.label || r.sel }, r.style, "default"), on: r.on !== false }));
     return m.layers;
   }
   function namedSets(m) {
