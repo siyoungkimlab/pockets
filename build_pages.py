@@ -38,6 +38,7 @@ TOP = 10  # pockets drawn per run (cavity traj writes the medoid frames of these
 SITE_RADIUS = 1.0  # A: a site point, half the grid spacing
 POLAR = "(not hydrogen or withinbonds 1 of (element N O S))"
 POCKET = 5.0  # A: residues this near the ligand are the holo site
+CA_POCKET = 8.0  # A: CA to ligand heavy atom, the pocket of the pocket RMSD
 COLUMNS = ["rank", "SiteScore", "Dscore", "volume", "probe", "rep", "frame", "p_max",
            "p_q90_open", "occupancy", "median_volume", "PPc"]
 MXMD_COLOUR = "#59c9a5"
@@ -123,6 +124,27 @@ def pocket_rmsd(apo, holo, holo_res: list, rmap: dict):
     P, Q = apo.positions[a], holo.positions[h]
     R, t = kabsch(P[is_ca], Q[is_ca])
     return float(np.sqrt((((P @ R + t) - Q) ** 2).sum(1).mean())), len(pairs)
+
+
+def pocket_ca_rmsd(apo, holo, lig: str, rmap: dict, cutoff: float = CA_POCKET):
+    """(CA RMSD, pocket residues, paired residues): the holo residues whose CA is within
+    ``cutoff`` of a ligand heavy atom, apo vs holo (residues paired by sequence), fitted on
+    those same CAs."""
+    lx = holo.positions[holo.select(f"({lig}) and not hydrogen").ids]
+    hca = holo.select(f"protein and name CA and not ({lig})").ids
+    d = np.sqrt(((holo.positions[hca][:, None] - lx[None]) ** 2).sum(-1)).min(1)
+    hres = np.asarray(holo.atoms.to_pandas()["residue"])
+    ares = np.asarray(apo.atoms.to_pandas()["residue"])
+    pocket = [int(hres[i]) for i in hca[d <= cutoff]]
+    apo_ca = {int(ares[i]): i for i in apo.select("protein and name CA").ids}
+    holo_ca = {int(hres[i]): i for i in hca}
+    pairs = [(apo_ca[rmap[r]], holo_ca[r]) for r in pocket if rmap.get(r) in apo_ca]
+    if len(pairs) < 3:
+        return None, len(pocket), len(pairs)
+    P = apo.positions[[a for a, _ in pairs]]
+    Q = holo.positions[[h for _, h in pairs]]
+    R, t = kabsch(P, Q)
+    return float(np.sqrt((((P @ R + t) - Q) ** 2).sum(1).mean())), len(pocket), len(pairs)
 
 
 def burial(holo, lig: str) -> float:
@@ -233,7 +255,7 @@ def page(root: Path, pair: str, out: Path, mxmd: Path | None = None) -> dict:
     rmap = residue_map(apo, holo)
     sel_holo = residue_sel(holo, holo_res)
     sel_apo = residue_sel(apo, [rmap[r] for r in holo_res if r in rmap])
-    rmsd, n_atoms = pocket_rmsd(apo, holo, holo_res, rmap)
+    rmsd, n_pocket, n_paired = pocket_ca_rmsd(apo, holo, lig, rmap)
     bur = burial(holo, lig)
     n_res = len(holo_res)
 
@@ -330,8 +352,8 @@ def page(root: Path, pair: str, out: Path, mxmd: Path | None = None) -> dict:
     v = Viewer(models, title=title, columns=[c for c in COLUMNS if any(c in m.row for m in models)])
     v.summary = [
         {"label": "pocket RMSD", "value": f"{rmsd:.2f} Å" if rmsd is not None else "—",
-         "title": f"apo vs holo, heavy atoms of the {n_res} residues within {POCKET:g} Å of the "
-                  f"ligand ({n_atoms} atoms), fitted on their alpha carbons"},
+         "title": f"apo vs holo, CA RMSD of the {n_pocket} residues with a CA within "
+                  f"{CA_POCKET:g} Å of a ligand heavy atom ({n_paired} in both), fitted on those CAs"},
         {"label": "burial", "value": f"{bur:.1%}",
          "title": "1 - SASA(ligand in the complex) / SASA(ligand alone), heavy atoms"},
     ]  # fmt: skip
