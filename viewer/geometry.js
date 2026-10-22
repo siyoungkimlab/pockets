@@ -1,6 +1,7 @@
 // A model's render state -> a scene of typed arrays for gl.js.
 // Every atom has its own state: shown or not, a style, a colour; every
-// residue its ribbon.  Selected atoms are drawn pink, with a ball.
+// residue its ribbon.  Selected atoms are drawn pink, with a ball (hidden ones
+// too), and a selected residue's ribbon pink.
 
 export const STYLES = ["line", "stick", "ballline", "ballstick", "space"];
 export const STYLE_NAMES = ["Line", "Stick", "Ball and Line", "Ball and Stick", "Space Filling"];
@@ -45,7 +46,7 @@ export function buildScene(models) {
   const m = { position: new Grow(), normal: new Grow(), color: new Grow(), index: [] };
   for (const model of models) {
     addModel(model, s, c, l, m);
-    for (const surf of model.surfaces || []) addSurface(surf, m);
+    if (model.surface) addSurface(model.surface, m);
   }
   return {
     spheres: { center: s.center.array, radius: s.radius.array, color: s.color.array },
@@ -69,7 +70,7 @@ function addModel({ topo, pos, ss, state, dashes }, s, c, l, m) {
   const size = topo.cg ? SIZES.beads : SIZES.atoms;
   const { show, style, rgb, sel } = state;
   const A = topo.atoms, B = topo.bonds, n = topo.natoms;
-  for (const d of dashes || []) dash(d, l);
+  for (const d of dashes || []) dash(d, l, c);
   const P = a => [pos[3 * a], pos[3 * a + 1], pos[3 * a + 2]];
   const C = a => sel[a] ? PINK : [rgb[3 * a], rgb[3 * a + 1], rgb[3 * a + 2]];
 
@@ -94,8 +95,9 @@ function addModel({ topo, pos, ss, state, dashes }, s, c, l, m) {
       const a0 = pi.map((x, d) => x + o[d]), b0 = pj.map((x, d) => x + o[d]);
       const mid = a0.map((x, d) => (x + b0[d]) / 2);
       if (line) {
-        l.position.push(...a0, ...mid, ...mid, ...b0);
-        l.color.push(...C(i), ...C(i), ...C(j), ...C(j));
+        const lr = (topo.cg ? LINE_RADIUS.beads : LINE_RADIUS.atoms) * (order === 1 ? 1 : 0.7);
+        segment(l, c, a0, mid, C(i), lr);
+        segment(l, c, mid, b0, C(j), lr);
       } else {
         const r = r0 * (order === 1 ? 1 : scale);
         c.a.push(...a0, ...mid); c.b.push(...mid, ...b0);
@@ -103,16 +105,23 @@ function addModel({ topo, pos, ss, state, dashes }, s, c, l, m) {
       }
     }
   }
+  // the traced atom of each residue whose ribbon is on
+  const R = topo.residues;
+  const traced = new Uint8Array(n);
+  for (let r = 0; r < R.trace.length; r++) if (R.trace[r] >= 0 && state.ribbon[r]) traced[R.trace[r]] = 1;
   // atoms: joints of sticks, balls, spheres; lone atoms of lines as small crosses
   for (let a = 0; a < n; a++) {
     if (!show[a]) {
-      continue;  // hidden atoms stay hidden, selected or not
+      // a hidden atom shows only when selected: a pink ball, or its ribbon turns pink
+      if (sel[a] && !traced[a]) { s.center.push(...P(a)); s.radius.push(size.picked); s.color.push(...PINK); }
+      continue;
     }
     const st = style[a];
     let r = 0;
     if (st === STICK) r = size.stick;
     else if (st === BALLLINE || st === BALLSTICK) r = size.ball * A.radius[a];
     else if (st === SPACE) r = A.radius[a];
+    else if (DETAIL > 1 && bonded[a]) r = topo.cg ? LINE_RADIUS.beads : LINE_RADIUS.atoms;  // a picture's line joints
     if (sel[a]) r = Math.max(r, size.picked);  // a selected atom shows as a pink ball
     if (r > 0) {
       s.center.push(...P(a)); s.radius.push(r); s.color.push(...C(a));
@@ -121,27 +130,31 @@ function addModel({ topo, pos, ss, state, dashes }, s, c, l, m) {
       for (let d = 0; d < 3; d++) {
         const u = [0, 0, 0];
         u[d] = size.cross;
-        l.position.push(p[0] - u[0], p[1] - u[1], p[2] - u[2], p[0] + u[0], p[1] + u[1], p[2] + u[2]);
-        l.color.push(...C(a), ...C(a));
+        segment(l, c, [p[0] - u[0], p[1] - u[1], p[2] - u[2]], [p[0] + u[0], p[1] + u[1], p[2] + u[2]], C(a),
+                (topo.cg ? LINE_RADIUS.beads : LINE_RADIUS.atoms));
       }
     }
   }
-  // ribbons: the traced atom of each residue whose ribbon is on, in the residue's colour
-  const R = topo.residues;
-  const traced = new Uint8Array(n);
+  // ribbons in the residue's colour, pink where the traced atom is selected
   const color = new Float32Array(n * 3);
   let any = false;
   for (let r = 0; r < R.trace.length; r++) {
     const t = R.trace[r];
-    if (t < 0 || !state.ribbon[r]) continue;
-    traced[t] = 1;
+    if (t < 0 || !traced[t]) continue;
     any = true;
-    for (let d = 0; d < 3; d++) color[3 * t + d] = state.ribbonRGB[3 * r + d];
+    for (let d = 0; d < 3; d++) color[3 * t + d] = sel[t] ? PINK[d] : state.ribbonRGB[3 * r + d];
   }
   if (any) {
     const shape = topo.cg ? CG_SHAPE : state.ribbonStyle === "tube" ? TUBE : SHAPE;
     cartoon(topo, pos, traced, ss, color, m, shape);
   }
+}
+
+// a line segment of one colour: a GL line, or (a picture) a thin cylinder
+function segment(l, c, p, q, color, r) {
+  if (DETAIL > 1) { c.a.push(...p); c.b.push(...q); c.radius.push(r); c.color.push(...color); return; }
+  l.position.push(...p, ...q);
+  l.color.push(...color, ...color);
 }
 
 // the side a multiple bond's strands spread to: toward a neighbour of either end
@@ -159,20 +172,24 @@ function offsetDirection(topo, pos, i, j) {
 }
 
 // a dashed line: 0.25 Å dashes, 0.15 Å gaps
-function dash([x0, y0, z0, x1, y1, z1, r, g, b], l) {
+function dash([x0, y0, z0, x1, y1, z1, r, g, b], l, c) {
   const len = Math.hypot(x1 - x0, y1 - y0, z1 - z0);
   for (let t = 0; t < len; t += 0.4) {
     const u = t / len, v = Math.min(t + 0.25, len) / len;
-    l.position.push(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, z0 + (z1 - z0) * u,
-                    x0 + (x1 - x0) * v, y0 + (y1 - y0) * v, z0 + (z1 - z0) * v);
-    l.color.push(r, g, b, r, g, b);
+    segment(l, c, [x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, z0 + (z1 - z0) * u],
+            [x0 + (x1 - x0) * v, y0 + (y1 - y0) * v, z0 + (z1 - z0) * v], [r, g, b], DASH_RADIUS);
   }
 }
 
 // --- cartoon -------------------------------------------------------------
 
-const SUB = 8;     // spline samples per residue
-const RING = 12;   // vertices around the cross-section
+let SUB = 8;     // spline samples per residue
+let RING = 12;   // vertices around the cross-section
+// 1: the screen's; 2: a picture's (smoother ribbons, lines drawn as thin sticks, which
+// a picture scaled down from a larger drawing would otherwise lose)
+let DETAIL = 1;
+export function setDetail(k) { DETAIL = k; SUB = k > 1 ? 18 : 8; RING = k > 1 ? 32 : 12; }
+const LINE_RADIUS = { atoms: 0.07, beads: 0.2 }, DASH_RADIUS = 0.06;
 const MAXGAP = { 1: 4.6, 2: 8.5 };  // trace distance (Å) above which a chain breaks
 // half width, half thickness of the cross-section; coarse-grained chains (no
 // secondary structure) are a thicker tube, in scale with their beads

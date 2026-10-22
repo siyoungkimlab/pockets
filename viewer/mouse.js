@@ -1,7 +1,8 @@
 // The mouse in the rendering area (Help | Mouse), and right-drag to zoom:
 //
 //   left    click: select an atom (or a bond, or a ribbon's residue); Shift toggles;
-//           Ctrl (or Cmd) takes the residue; double-click: the molecule (of its class);
+//           Ctrl (or Cmd) takes the residue; double-click: the residue;
+//           triple-click (or double-click it again): the molecule (of its class);
 //           drag: select a box (Shift adds, Ctrl takes residues); click away: clear
 //   middle  drag: rotate; in the perimeter: about z; Shift: pan; Ctrl: zoom;
 //           click an atom: the centre of rotation (away from atoms: back to the view's)
@@ -10,7 +11,9 @@
 //   right   the popup menu;  wheel: zoom;  Shift over an atom: what it is
 //
 // A two-button mouse (Help | Mouse) uses the right button as the middle one and
-// opens the popup when Alt is pressed and released alone.
+// opens the popup when Alt is pressed and released alone.  A trackpad (Help | Mouse)
+// rotates with a two-finger swipe (in the perimeter: about z), pans with Shift and
+// zooms with a pinch.
 
 const PERIMETER = 0.07;  // the band at the edges where dragging turns about z
 
@@ -20,6 +23,7 @@ export function setupMouse(app) {
   const rubber = document.getElementById("rubber");
   const bubble = document.getElementById("bubble");
   state.twoButton = localStorage.getItem("boonza.twoButton") === "1";
+  state.trackpad = localStorage.getItem("boonza.trackpad") === "1";
 
   let drag = null;
   const local = e => {
@@ -39,11 +43,15 @@ export function setupMouse(app) {
   canvas.addEventListener("contextmenu", e => e.preventDefault());
 
   canvas.addEventListener("pointerdown", e => {
+    // the view takes the keys back (Delete, Ctrl Z ...) from a field or list clicked before
+    const focused = document.activeElement;
+    if (focused && focused !== document.body && focused.blur) focused.blur();
     app.stopFlight();
     altAlone = false;
     const [x, y] = local(e);
     drag = { role: role(e.button), x0: x, y0: y, x, y, moved: false, shift: e.shiftKey,
              ctrl: e.ctrlKey || e.metaKey, alt: e.altKey, perimeter: inPerimeter(x, y) };
+    if (drag.role === "left") app.message("");  // a click in the view puts a message away
     canvas.setPointerCapture(e.pointerId);
     if (drag.role === "left" && drag.alt) startDihedral();
     e.preventDefault();
@@ -71,6 +79,7 @@ export function setupMouse(app) {
 
   canvas.addEventListener("pointermove", e => {
     const [x, y] = local(e);
+    if (drag && !e.buttons) { cancel(); return; }  // the button went up where we did not hear it
     if (!drag) { hover(e, x, y); return; }
     const dx = x - drag.x, dy = y - drag.y;
     if (!dx && !dy) return;
@@ -78,9 +87,6 @@ export function setupMouse(app) {
     drag.moved = true;
     drag.x = x; drag.y = y;
     bubble.hidden = true;
-    // a static page (an export) is for looking: a left drag turns the view, as a web
-    // viewer's does, for trackpads and phones with no middle button
-    if (drag.role === "left" && app.STATIC && !drag.alt) drag.role = "middle";
 
     if (drag.role === "left") {
       if (drag.alt) {
@@ -175,8 +181,20 @@ export function setupMouse(app) {
       }
       return;
     }
-    if (d.role === "right" && !d.moved) app.popup(e.clientX, e.clientY);
+    if (d.role === "right" && !d.moved) app.popup(e.clientX, e.clientY, app.pick(x, y));
   });
+
+  // a drag the browser takes away (a trackpad gesture, a window switch): it ends
+  // there, with nothing selected and no box left on the screen
+  function cancel() {
+    if (drag?.moving === "yes") app.endMove();
+    drag = null;
+    rubber.hidden = true;
+  }
+  canvas.addEventListener("pointercancel", cancel);
+  canvas.addEventListener("lostpointercapture", () => { if (drag) cancel(); });
+  window.addEventListener("blur", () => { if (drag) cancel(); });
+  window.addEventListener("keydown", e => { if (e.key === "Escape" && drag) cancel(); });
 
   function residuesOf(m, ids) {
     const out = new Set();
@@ -186,6 +204,7 @@ export function setupMouse(app) {
 
   function click(x, y, d) {
     const hit = app.pick(x, y);
+    if (app.applyTool?.(hit, x, y)) return;  // a builder tool in hand takes the click
     if (!hit) {
       if (!d.shift && !d.ctrl) { app.clearSelection(); app.rebuild(); app.onSelection(); }
       return;
@@ -199,21 +218,49 @@ export function setupMouse(app) {
       + `  (order ${m.topo.bonds.order[m.topo.bonds.i.findIndex((i, k) => (i === hit.atoms[0] && m.topo.bonds.j[k] === hit.atoms[1]) || (i === hit.atoms[1] && m.topo.bonds.j[k] === hit.atoms[0]))] ?? 1})`);
   }
 
-  // double-click: the atom's molecule, as far as it is of the atom's class
-  canvas.addEventListener("dblclick", e => {
+  // double-click (an atom, a bond or a ribbon): its residue; a triple click, or a
+  // double-click again on that residue: its molecule, as far as it is of the
+  // atom's class; again: the residue
+  let lastDouble = null;
+  function residueOrMolecule(e, molecule) {
+    if (app.toolActive?.()) return;
     const [x, y] = local(e);
     const hit = app.pick(x, y);
-    if (!hit || hit.atom === undefined) return;
+    if (!hit) return;
     const m = hit.model, A = m.topo.atoms;
-    const f = A.fragment[hit.atom], c = A.class[hit.atom];
-    const ids = app.range(m.topo.natoms).filter(a => A.fragment[a] === f && A.class[a] === c);
+    const seed = hit.atom ?? hit.atoms?.[0] ?? m.topo.residueAtoms[hit.residue][0];
+    const r = A.residue[seed];
+    const whole = molecule || (lastDouble?.model === m && lastDouble.residue === r && lastDouble.level === "residue");
+    let ids = m.topo.residueAtoms[r];
+    if (whole) {
+      const f = A.fragment[seed], c = A.class[seed];
+      ids = app.range(m.topo.natoms).filter(a => A.fragment[a] === f && A.class[a] === c);
+    }
+    lastDouble = { model: m, residue: r, level: whole ? "molecule" : "residue" };
     app.select(m, ids, e.shiftKey ? "add" : "set");
-  });
+  }
+  canvas.addEventListener("dblclick", e => residueOrMolecule(e, false));
+  canvas.addEventListener("click", e => { if (e.detail === 3 && e.button === 0) residueOrMolecule(e, true); });
 
   canvas.addEventListener("wheel", e => {
     e.preventDefault();
     app.stopFlight();
-    camera.zoom(Math.exp(e.deltaY * 0.0015));
+    if (state.trackpad && e.ctrlKey) {  // a pinch
+      camera.zoom(Math.exp(e.deltaY * 0.01));
+    } else if (state.trackpad) {  // a two-finger swipe
+      const dx = -e.deltaX, dy = -e.deltaY;
+      const [x, y] = local(e);
+      if (e.shiftKey) {
+        const scale = 2 * camera.distance * Math.tan(camera.fov / 2) / canvas.clientHeight;
+        camera.pan(dx * scale, -dy * scale);
+      } else if (inPerimeter(x, y)) {
+        camera.rotate(0, 0, 1, zTurn(x + dx, y + dy, dx, dy));
+      } else if (dx || dy) {
+        camera.rotate(dy, dx, 0, Math.hypot(dx, dy) * 0.008);
+      }
+    } else {
+      camera.zoom(Math.exp(e.deltaY * 0.0015));
+    }
     app.draw();
   }, { passive: false });
 

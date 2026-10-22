@@ -4,7 +4,7 @@
 
 import { Camera } from "./camera.js";
 import { colorAtoms, colorResidues } from "./colors.js";
-import { buildScene, STYLES } from "./geometry.js";
+import { buildScene, setDetail, STYLES } from "./geometry.js";
 import { Renderer } from "./gl.js";
 import { setupMouse } from "./mouse.js";
 import { surface } from "./surface.js";
@@ -17,6 +17,7 @@ const camera = new Camera();
 const CACHE_BYTES = 256e6;  // frames kept in the page, over all models
 const CONTACT_COLOR = [0.2, 0.75, 1];
 const METER_COLOR = [0.95, 0.75, 0.1];
+const HBOND_COLOR = [0.3, 0.9, 0.45];
 const STYLE = Object.fromEntries(STYLES.map((s, k) => [s, k]));
 const FROM_REP = { cartoon: null, sticks: STYLE.stick, ballstick: STYLE.ballstick,
                    lines: STYLE.line, spheres: STYLE.space, picked: STYLE.ballstick };
@@ -27,6 +28,7 @@ const state = {
   masks: [true, true, true, true],  // pickable: receptor, ligand, solvent, ribbons
   hydrogens: "polar",               // shown: all, polar, none
   contacts: false, meters: [], labelMode: "name", busy: 0,
+  surfaceGrid: +(localStorage.getItem("boonza.surfaceGrid") || 0.5),  // A, Render | Surface | Resolution
 };
 
 // --- server ----------------------------------------------------------------
@@ -188,16 +190,14 @@ async function load(model) {
       topo.atoms.residue.forEach((r, a) => topo.residueAtoms[r].push(a));
       topo.flags = hydrogenFlags(topo);
       topo.bondsOf = bondIndex(topo);
-      const f = await getFrame(model, frameOf(model, topo));
+      const f = await getFrame(model, Math.min(state.frame, topo.nframes - 1));
       model.pos = f.pos; model.box = f.box; model.ss = topo.ss;
       model.topo = topo;
       const old = model.keep;  // the state before a reload, to carry over by atom name
       model.state = initialState(model);
       if (old) carryOver(old, model);
       else {
-        // a representation with on: false is there to switch on (Representations), not drawn yet
-        applyReps(model, await Promise.all(topo.reps.filter(r => r.on !== false)
-          .map(async r => ({ ...r, ids: r.ids || await selectIds(model, r.sel) }))));
+        applyReps(model, await Promise.all(topo.reps.map(async r => ({ ...r, ids: r.ids || await selectIds(model, r.sel) }))));
         tintReceptor(model);
       }
       model.keep = null;
@@ -238,7 +238,8 @@ function carryOver(old, model) {
   }
   // new atoms (a group, a side chain, hydrogens) look like the atoms they hang on:
   // spread outward through the bonds, never selected
-  let known = found.map(o => o >= 0 ? 1 : 0), grew = true;
+  const known = found.map(o => o >= 0 ? 1 : 0);
+  let grew = true;
   while (grew) {
     grew = false;
     for (let a = 0; a < n; a++) {
@@ -251,6 +252,9 @@ function carryOver(old, model) {
       known[a] = 1; grew = true;
     }
   }
+  // a new molecule, bonded to nothing that was there: sticks, coloured by element
+  const style = model.group === "built" ? STYLE.ballstick : STYLE.stick;
+  for (let a = 0; a < n; a++) if (!known[a]) { st.show[a] = 1; st.style[a] = style; }
   st.ribbon.set(old.ribbon.subarray(0, Math.min(old.ribbon.length, st.ribbon.length)));
   st.ribbonRGB.set(old.ribbonRGB.subarray(0, Math.min(old.ribbonRGB.length, st.ribbonRGB.length)));
   st.ribbonStyle = old.ribbonStyle;
@@ -280,18 +284,12 @@ async function selectIds(model, sel) {
     if (!ids) throw new Error("selections typed in need boonza view");
     return Int32Array.from(ids);
   }
-  const frame = model.topo ? frameOf(model) : 0;
+  const frame = model.topo ? Math.min(state.frame, model.topo.nframes - 1) : 0;
   return Int32Array.from((await post("api/select", { m: model.index, sel, frame })).ids);
 }
 
-// the frame a model shows: its own, when a site pinned it (the MD frame the site was
-// found in), else the player's
-function frameOf(m, topo = m.topo) {
-  return m.pinned ?? Math.min(state.frame, topo.nframes - 1);
-}
-
-function nframes() {  // the player's: models a site pins keep to their frame
-  return Math.max(1, ...shownModels().filter(m => m.pinned === undefined).map(m => m.topo.nframes));
+function nframes() {
+  return Math.max(1, ...shownModels().map(m => m.topo.nframes));
 }
 
 async function show(models, on = true) {
@@ -299,29 +297,17 @@ async function show(models, on = true) {
   // a model tied to a frame of another (a site and the MD frame it was found in):
   // that model comes along, at that frame
   const linked = on ? models.filter(m => m.frame) : [];
-  const pinned = [];
   for (const m of linked) {
     const target = state.models.find(t => t.name === m.frame.model && !t.closed);
-    if (!target) continue;
-    target.shown = true;
-    target.pinned = m.frame.i;
-    pinned.push(target);
-    if (!models.includes(target)) models = [...models, target];
-  }
-  // a model only sites bring along (not in the list) goes when no site shown needs it
-  for (const t of state.models) {
-    if (t.listed === false && t.shown && !state.models.some(m => m.shown && m.frame?.model === t.name)) t.shown = false;
+    if (target && !models.includes(target)) { target.shown = true; models = [...models, target]; }
   }
   try {
     await Promise.all(models.filter(() => on).map(load));
   } catch (e) {
     message(e.message, true);
   }
-  for (const t of pinned) {  // each at its own frame
-    if (!t.topo) continue;
-    const f = await getFrame(t, t.pinned);
-    t.pos = f.pos; t.box = f.box;
-  }
+  const last = linked[linked.length - 1];
+  if (last) { await setFrame(last.frame.i); app.onModels(); return; }
   await refreshContacts();
   updatePlayer();
   rebuild();
@@ -334,7 +320,6 @@ async function solo(model) {
   for (const m of live()) if (m.group === model.group) m.shown = m === model;
   state.current = model.index;
   await show([model]);
-  if (state.focus) return;  // the view stays on the focus: does this site fall in its pocket?
   const ids = interesting(model);
   if (ids.length) { const [c, r] = bounds(model, ids); flyTo(c, r + (model.topo.cg ? 10 : 6)); }
 }
@@ -414,32 +399,18 @@ function cellLines(box) {
   return out;
 }
 
-// a model's surface (Render | Surface): made again when its atoms move or its kind changes
-function surfacesOf(m) {
-  const want = m.surfaces || [];
-  m.surfaceCache = m.surfaceCache || new Map();
-  const out = [];
-  for (const w of want) {
-    const key = `${w.version}`;
-    let c = m.surfaceCache.get(key);
-    if (!c || c.pos !== m.pos) {
-      const t0 = performance.now();
-      // a plain surface in a colour of its own: its atoms coloured so, for this surface only
-      let model = m;
-      if (w.kind === "plain" && w.color && w.color !== "default") {
-        const rgb = m.state.rgb.slice();
-        colorAtoms(w.color === "model" ? `element/${m.color || "white"}` : w.color, w.ids, m.topo, m.ss, rgb);
-        model = { ...m, state: { ...m.state, rgb } };
-      }
-      c = { pos: m.pos, mesh: surface(model, w.ids, w.kind) };
-      m.surfaceCache.set(key, c);
-      const s = (performance.now() - t0) / 1000;
-      if (s > 2) message(`surface: ${c.mesh.index.length / 3} triangles in ${s.toFixed(1)} s`);
-    }
-    out.push(c.mesh);
-  }
-  for (const k of [...m.surfaceCache.keys()]) if (!want.some(w => `${w.version}` === k)) m.surfaceCache.delete(k);
-  return out;
+// a model's surface (Render | Surface): made again when its atoms move, or its kind
+// or the resolution changes
+function surfaceOf(m) {
+  const want = m.surfaceSpec;
+  if (!want) return null;
+  const s = m.surfaceMesh, grid = state.surfaceGrid;
+  if (s && s.pos === m.pos && s.kind === want.kind && s.version === want.version && s.grid === grid) return s.mesh;
+  const t0 = performance.now();
+  const mesh = surface(m, want.ids, want.kind, grid);
+  m.surfaceMesh = { pos: m.pos, kind: want.kind, version: want.version, grid, mesh };
+  if (performance.now() - t0 > 2000) message(`surface: ${mesh.index.length / 3} triangles in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  return mesh;
 }
 
 function rebuild() {
@@ -451,13 +422,16 @@ function rebuild() {
     for (let a = 0; a < n; a++) show[a] = visibleAtom(m, a) ? 1 : 0;
     const dashes = [];
     if (state.contacts) for (const [i, j] of m.contacts || []) dashes.push([...xyz(m, i), ...xyz(m, j), ...CONTACT_COLOR]);
+    if (state.hbonds) for (const [i, j] of m.hbonds || []) dashes.push([...xyz(m, i), ...xyz(m, j), ...HBOND_COLOR]);
     for (const meter of state.meters) {
       if (meter.model !== m) continue;
       const a = meter.atoms;
       for (let k = 0; k + 1 < a.length; k++) dashes.push([...xyz(m, a[k]), ...xyz(m, a[k + 1]), ...METER_COLOR]);
     }
     m.drawn = show;
-    return { topo: m.topo, pos: m.pos, ss: m.ss, state: { ...st, show }, dashes, surfaces: surfacesOf(m) };
+    // a picture leaves out the selection's highlight
+    const sel = state.picture ? new Uint8Array(n) : st.sel;
+    return { topo: m.topo, pos: m.pos, ss: m.ss, state: { ...st, show, sel }, dashes, surface: surfaceOf(m) };
   });
   const scene = buildScene(items);
   showSummary();
@@ -477,6 +451,21 @@ function rebuild() {
 }
 
 const xyz = (m, a) => [m.pos[3 * a], m.pos[3 * a + 1], m.pos[3 * a + 2]];
+
+// a picture: the scene drawn in detail (rounder sticks and ribbons, lines as sticks),
+// without the selection's highlight; ``draw(renderer)`` makes it, then the screen's is back
+function withPictureScene(draw) {
+  state.picture = true;
+  setDetail(2); renderer.detail = 2;
+  try {
+    rebuild();
+    return draw(renderer);
+  } finally {
+    state.picture = false;
+    setDetail(1); renderer.detail = 1;
+    rebuild();
+  }
+}
 
 // --- labels: atom labels, meters, pocket numbers ------------------------------------
 
@@ -624,6 +613,20 @@ function resetView() {
   camera.pivot = null;
   camera.fit(...sphereOf(drawnXYZ()), canvas.clientWidth / canvas.clientHeight);
   draw();
+}
+
+// the point under screen (x, y), in the plane through the view's centre facing the eye
+function unproject(x, y) {
+  const r = camera.rot, scale = 2 * camera.distance * Math.tan(camera.fov / 2) / canvas.clientHeight;
+  const vx = (x - canvas.clientWidth / 2) * scale, vy = -(y - canvas.clientHeight / 2) * scale;
+  return [0, 1, 2].map(d => camera.center[d] + r[d] * vx + r[3 + d] * vy);
+}
+
+// of a bond's two atoms, the one nearer screen (x, y)
+function nearerAtom(m, atoms, x, y) {
+  const project = projector();
+  const d = a => { const p = project(m, a); return p ? Math.hypot(p[0] - x, p[1] - y) : Infinity; };
+  return d(atoms[0]) <= d(atoms[1]) ? atoms[0] : atoms[1];
 }
 
 // --- picking -----------------------------------------------------------------------
@@ -805,12 +808,31 @@ function updatePlayer() {
 }
 
 async function refreshContacts() {
+  if (state.hbonds) await refreshHbonds();
   if (!state.contacts) return;
   await Promise.all(shownModels().map(async m => {
-    const i = frameOf(m);
+    const i = Math.min(state.frame, m.topo.nframes - 1);
     try { m.contacts = (await getJSON(`api/contacts?m=${m.index}&i=${i}`)).contacts; }
     catch (e) { m.contacts = []; }
   }));
+}
+
+// hydrogen bonds between two selections (Compute | Hydrogen Bonds), in each shown model
+async function refreshHbonds() {
+  const { b, sel } = state.hbonds;
+  let n = 0, how = "";
+  const found = new Set();  // the methods of the models that found some
+  await Promise.all(shownModels().map(async m => {
+    const frame = Math.min(state.frame, m.topo.nframes - 1);
+    const a = sel ? selected(m) : state.hbonds.a;  // the selection: in the models that have one
+    if (sel && !a.length) { m.hbonds = []; return; }
+    try {
+      const out = await post("api/hbonds", { m: m.index, a, b, frame });
+      m.hbonds = out.pairs; n += out.pairs.length;
+      if (out.pairs.length) found.add(out.method); else how = how || out.method;
+    } catch (e) { m.hbonds = []; how = e.message; }
+  }));
+  return { n, how: found.size ? [...found].join("; ") : how };
 }
 
 async function setFrame(i) {
@@ -819,7 +841,7 @@ async function setFrame(i) {
   if (state.loading) { state.pending = i; return; }
   state.loading = true;
   try {
-    await Promise.all(shownModels().filter(m => m.pinned === undefined).map(async m => {
+    await Promise.all(shownModels().map(async m => {
       const k = Math.min(i, m.topo.nframes - 1);
       const f = await getFrame(m, k);
       if (state.ssEachFrame) m.ss = (await getJSON(`api/ss?m=${m.index}&i=${k}`)).ss;
@@ -942,13 +964,13 @@ async function restorePage(page) {
 const app = {
   state, camera, renderer, canvas,
   getJSON, post, busy, message, atomLabel,
-  live, shownModels, currentModel, load, show, solo, reloadModel, selectIds, newModel, applyReps, tintReceptor,
+  live, shownModels, currentModel, load, show, solo, reloadModel, selectIds, newModel, applyReps,
   selected, selection, targets, select, clearSelection, visibleAtom,
   rebuild, draw, flyTo, stopFlight, centerView, resetView, viewAll, bounds, measure, xyz,
-  pick, inRect, beginMove, rotateSelected, translateSelected, turnDihedral, endMove,
-  setFrame, play, nframes, updatePlayer, refreshContacts,
-  range, STYLE, FROM_REP, pageState, restorePage, PYTHON,
-  onSelection: () => {}, onModels: () => {},  // ui.js fills these in
+  pick, inRect, unproject, nearerAtom, beginMove, rotateSelected, translateSelected, turnDihedral, endMove,
+  setFrame, play, nframes, updatePlayer, refreshContacts, refreshHbonds, TOKEN,
+  range, STYLE, pageState, restorePage, PYTHON, withPictureScene,
+  onSelection: () => {}, onModels: () => {}, onEmpty: () => {},  // ui.js fills these in
 };
 app.STATIC = STATIC;
 window.boonzaView = app;  // for scripting the page (and testing it)
@@ -985,16 +1007,19 @@ async function main() {
     state.title = listing.title;
     state.columns = listing.columns;
     state.summary = listing.summary || [];
-    state.focus = listing.focus || null;
     state.groups = listing.groups || {};  // the builder's functional groups: name -> SMILES
     state.models = listing.models.map((m, index) => newModel(m, index));
     document.title = listing.title ? `${listing.title} · boonza` : "boonza";
+    if (!state.models.length) {  // an empty view: build something, or open it
+      rebuild();
+      app.onEmpty();
+      return;
+    }
     const first = state.models.find(m => m.shown) || state.models[0];
     first.shown = true;
     state.current = first.index;
     await show(state.models.filter(m => m.shown));
     resetView();
-    if (state.focus && !listing.page) await app.siteView({ quick: true, look: true });
     showSummary();
     if (listing.page) await restorePage(listing.page);
     app.onSelection();
