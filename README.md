@@ -1,7 +1,7 @@
 # Finding ligand pockets in apo structures
 
 A static site (GitHub Pages) for apo/holo pairs of the Schrödinger set (43) and the
-adversarially challenging sites set (5; its 2zku_3vqs is `2zku_3vqs_acs/`): the apo
+adversarially challenging sites set (4): the apo
 and holo structures, the top 10 sites Schrödinger MxMD + SiteMap finds (Schrödinger
 set only), and the top 10 pockets CRUMB (`boonza cavity traj`, volume200, p_max)
 finds in coarse-grained simulations of the apo protein with 18 amino-acid probes,
