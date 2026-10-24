@@ -10,7 +10,7 @@ its MD frame, and mxmd_sitemap_result/PAIR.csv), the top sites by SiteScore draw
 Every run's coordinates are put in the frame of the first run's (its cavity_volume
 apo.mae / holo.mae, already superposed on that run), fitted on the apo heavy atoms.
 Each pocket is one model: the run's protein beads (gray) at the MD frame the pocket was
-found in, and the pocket's medoid site (in the run's colour).  The
+found in, and the pocket's medoid site (each rank its own colour).  The
 shared viewer code goes to SITE/viewer/, each pair's page and data/ to SITE/PAIR/.
 """
 
@@ -28,7 +28,7 @@ from boonza.pockets.prepare import protein_ids
 from boonza.system import System
 from boonza.viewer import Model, Session, Viewer, bead_radii
 from boonza.viewer.export import STATIC, export
-from boonza.viewer.outputs import points
+from boonza.viewer.outputs import POCKET_COLOURS, points
 from boonza.viewer.session import CG_POLYMER
 
 #: (library, model, colour): the CRUMB runs drawn
@@ -42,7 +42,7 @@ CA_POCKET = 8.0  # A: CA to ligand heavy atom, the pocket of the pocket RMSD
 COLUMNS = ["rank", "SiteScore", "Dscore", "volume", "probe", "rep", "frame", "p_max",
            "p_q90_open", "occupancy", "median_volume", "PPc"]
 MXMD_COLOUR = "#59c9a5"
-PROTEIN_COLOUR = "gray"  # every pocket's and site's protein; its points take its run's colour
+PROTEIN_COLOUR = "gray"  # every pocket's and site's protein; its points take its rank's colour
 
 
 def cavity_dir(root: Path, lib: str, ff: str, pair: str) -> Path:
@@ -201,11 +201,12 @@ def mxmd_models(mxmd: Path, pair: str, ref_apo, top: int) -> list:
         summary = overlap_summary(float(r["center_to_nearest_ligand_atom"]), lvc, pvn,
                                   "from the site's centre to the nearest ligand heavy atom "
                                   "(PPc: under 4 Å)")  # fmt: skip
+        spot = POCKET_COLOURS[(k - 1) % len(POCKET_COLOURS)]
 
-        def load_site(system=system, k=k):
+        def load_site(system=system, spot=spot, k=k):
             reps = [{"sel": "(protein or nucleic) and not resname PKT", "style": "cartoon",
                      "color": PROTEIN_COLOUR, "label": "protein"},
-                    {"sel": "resname PKT", "style": "spheres", "color": MXMD_COLOUR,
+                    {"sel": "resname PKT", "style": "spheres", "color": spot,
                      "label": f"site {k}"}]  # fmt: skip
             return Session(system, title=f"site {k}", ligand="resname PKT", reps=reps,
                            sizes={"resname PKT": SITE_RADIUS})  # fmt: skip
@@ -323,8 +324,9 @@ def page(root: Path, pair: str, out: Path, mxmd: Path | None = None) -> dict:
             summary = overlap_summary(dist, lvc, pvn,
                                       "from the site's centroid to the nearest ligand heavy "
                                       "atom (PPc, at the pocket's centre: under 4 Å)")  # fmt: skip
+            spot = POCKET_COLOURS[(k - 1) % len(POCKET_COLOURS)]
 
-            def load_pocket(beads=beads, pts=pts @ R + t, colour=colour, k=k):
+            def load_pocket(beads=beads, pts=pts @ R + t, colour=colour, spot=spot, k=k):
                 s = beads.clone()
                 radii = np.r_[bead_radii(beads), np.full(len(pts), SITE_RADIUS)]
                 n = len(pts)
@@ -333,7 +335,7 @@ def page(root: Path, pair: str, out: Path, mxmd: Path | None = None) -> dict:
                                             resids=np.arange(1, n + 1)))  # fmt: skip
                 reps = [{"sel": f"{CG_POLYMER} and not resname PKT", "style": "cartoon",
                          "color": PROTEIN_COLOUR, "label": "protein"},
-                        {"sel": "resname PKT", "style": "spheres", "color": colour,
+                        {"sel": "resname PKT", "style": "spheres", "color": spot,
                          "label": f"pocket {k}"}]  # fmt: skip
                 session = Session(s, title=f"pocket {k}", ligand="resname PKT", cg=True,
                                   reps=reps, radii=radii)  # fmt: skip
