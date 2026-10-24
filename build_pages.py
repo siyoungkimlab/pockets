@@ -213,7 +213,7 @@ def mxmd_models(mxmd: Path, pair: str, ref_apo, top: int) -> list:
 
         models.append(Model(f"site {k} · {probe} rep{rep}", load_site,
                             group="Schrödinger MxMD + SiteMap", shown=False, row=row,
-                            label=str(k), color=PROTEIN_COLOUR, summary=summary))  # fmt: skip
+                            label=str(k), color=PROTEIN_COLOUR, swatch=spot, summary=summary))  # fmt: skip
     return models, fits
 
 
@@ -346,7 +346,7 @@ def page(root: Path, pair: str, out: Path, mxmd: Path | None = None) -> dict:
                 return session
 
             models.append(Model(f"pocket {k}", load_pocket, group=tag, shown=False, row=row,
-                                label=str(k), color=PROTEIN_COLOUR, summary=summary))  # fmt: skip
+                                label=str(k), color=PROTEIN_COLOUR, swatch=spot, summary=summary))  # fmt: skip
         counts.append(len(frames))
 
     title = f"{pair}: apo/holo, Schrödinger and CRUMB" if mxmd else f"{pair}: apo/holo and CRUMB"
