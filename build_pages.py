@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 import boonza
+from boonza.cavity.cli import _same_atoms
 from boonza.cavity.report import _drawable
 from boonza.pockets.prepare import protein_ids
 from boonza.system import System
@@ -294,7 +295,7 @@ def page(root: Path, pair: str, out: Path, mxmd: Path | None = None) -> dict:
         ids = protein_ids(system)
         view = workdir / "view.dms"
         view = boonza.load(view) if view.is_file() else system
-        if view.natoms != system.natoms:
+        if not _same_atoms(view, system):  # as cavity traj: a Go run's stale view.dms
             view = system
         slot = {lab: i for i, lab in enumerate(labels(view.clone(ids)))}
         if len(slot) != len(ids):
